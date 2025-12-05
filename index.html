@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Theremin JavaScript</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #222;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            text-align: center;
+            overflow: hidden; /* Evita scroll al mover el móvil */
+        }
+        h1 { margin-bottom: 10px; }
+        #status { font-size: 1.2rem; margin-bottom: 20px; color: #aaa; }
+        
+        button {
+            padding: 15px 30px;
+            font-size: 1.2rem;
+            background-color: #00d2ff;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            color: #000;
+            font-weight: bold;
+            box-shadow: 0 0 15px #00d2ff;
+            transition: transform 0.1s;
+        }
+        button:active { transform: scale(0.95); }
+
+        .data-display {
+            margin-top: 30px;
+            padding: 15px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            width: 80%;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>🎵 Theremin Móvil</h1>
+    <p id="status">Pulsa el botón para activar</p>
+    
+    <button id="startBtn">ACTIVAR SONIDO Y SENSORES</button>
+
+    <div class="data-display">
+        <p>Frecuencia (Beta): <span id="freqVal">0</span> Hz</p>
+        <p>Volumen (Gamma): <span id="volVal">0</span> %</p>
+    </div>
+
+    <script>
+        let audioCtx;
+        let oscillator;
+        let gainNode;
+        let isPlaying = false;
+
+        const startBtn = document.getElementById('startBtn');
+        const statusText = document.getElementById('status');
+        const freqDisp = document.getElementById('freqVal');
+        const volDisp = document.getElementById('volVal');
+
+        // Configuración inicial del Audio
+        function initAudio() {
+            // 1. Crear contexto de audio (Cross-browser)
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            audioCtx = new AudioContext();
+
+            // 2. Crear Oscilador (Generador de ondas)
+            oscillator = audioCtx.createOscillator();
+            oscillator.type = 'sine'; // Onda senoidal (suave, como un silbido)
+            
+            // 3. Crear nodo de Ganancia (Control de volumen)
+            gainNode = audioCtx.createGain();
+            
+            // 4. Conectar: Oscilador -> Ganancia -> Altavoces
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            // Iniciar con volumen 0 para que no asuste
+            gainNode.gain.value = 0;
+            oscillator.start();
+            isPlaying = true;
+        }
+
+        // Función que maneja los sensores
+        function handleOrientation(event) {
+            if (!isPlaying) return;
+
+            // --- BETA: Inclinación adelante/atrás (-180 a 180) ---
+            // Lo limitamos a un rango útil de 0 a 90 grados para frecuencia
+            let beta = event.beta; 
+            if (beta < 0) beta = 0; // Solo inclinación hacia el usuario
+            if (beta > 90) beta = 90;
+
+            // Mapear inclinación a Frecuencia (Hz)
+            // Rango deseado: 200Hz (grave) a 1000Hz (agudo)
+            const frequency = 200 + (beta * 8); 
+            
+            // --- GAMMA: Inclinación Izquierda/Derecha (-90 a 90) ---
+            let gamma = event.gamma;
+            // Normalizar gamma para volumen (0 a 1)
+            // Supongamos que -45 es silencio y +45 es volumen máximo
+            let volume = (gamma + 45) / 90;
+            
+            // Limitar valores entre 0 y 1
+            if (volume < 0) volume = 0;
+            if (volume > 1) volume = 1;
+
+            // APLICAR CAMBIOS AL SONIDO EN TIEMPO REAL
+            // Usamos setTargetAtTime para suavizar la transición y evitar "clicks"
+            oscillator.frequency.setTargetAtTime(frequency, audioCtx.currentTime, 0.05);
+            gainNode.gain.setTargetAtTime(volume, audioCtx.currentTime, 0.05);
+
+            // Actualizar pantalla
+            freqDisp.innerText = Math.round(frequency);
+            volDisp.innerText = Math.round(volume * 100);
+            
+            // Cambiar color de fondo según el tono para efecto visual
+            document.body.style.backgroundColor = `hsl(${frequency / 4}, 50%, 20%)`;
+        }
+
+        // --- GESTIÓN DE PERMISOS (CRUCIAL PARA iOS 13+) ---
+        startBtn.addEventListener('click', async () => {
+            
+            // 1. Iniciar Audio (Navegadores bloquean audio si no hay click)
+            if (!audioCtx) initAudio();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            // 2. Solicitar permiso de sensores
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                // iOS 13+ requiere esto
+                try {
+                    const permission = await DeviceOrientationEvent.requestPermission();
+                    if (permission === 'granted') {
+                        window.addEventListener('deviceorientation', handleOrientation);
+                        statusText.innerText = "¡Sensores Activos! Mueve el móvil.";
+                        startBtn.style.display = 'none';
+                    } else {
+                        alert("Permiso denegado para usar el giroscopio.");
+                    }
+                } catch (e) {
+                    console.error(e);
+                    alert("Error al solicitar permisos.");
+                }
+            } else {
+                // Android y dispositivos antiguos (No requieren permiso explícito)
+                window.addEventListener('deviceorientation', handleOrientation);
+                statusText.innerText = "¡Sensores Activos! Mueve el móvil.";
+                startBtn.style.display = 'none';
+            }
+        });
+
+    </script>
+</body>
+</html>
