@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Theremin JavaScript Avanzado</title>
+    <title>Theremin JavaScript V2</title>
     <style>
         body {
             font-family: 'Arial', sans-serif;
@@ -17,11 +17,9 @@
             text-align: center;
             overflow: hidden; 
             transition: background-color 0.5s;
-            margin: 0;
-            padding: 0;
         }
         h1 { margin-bottom: 10px; }
-        #status { font-size: 1rem; margin-bottom: 15px; color: #aaa; }
+        #status { font-size: 1.2rem; margin-bottom: 20px; color: #aaa; }
         
         button {
             padding: 15px 30px;
@@ -33,76 +31,44 @@
             color: #000;
             font-weight: bold;
             box-shadow: 0 0 15px #00d2ff;
-            transition: transform 0.1s, background-color 0.3s;
-            margin-bottom: 20px;
+            transition: transform 0.1s;
+            margin-bottom: 10px;
         }
         button:active { transform: scale(0.95); }
         .stop-color { background-color: #ff3838; box-shadow: 0 0 15px #ff3838; }
 
         .data-display {
-            display: flex;
-            justify-content: space-around;
-            width: 90%;
-            max-width: 400px;
-            margin-top: 10px;
+            margin-top: 30px;
             padding: 15px;
             background: rgba(255,255,255,0.1);
             border-radius: 10px;
-            font-size: 0.9rem;
-        }
-        .data-item {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-        #visualizer {
-            display: block;
-            background-color: rgba(0, 0, 0, 0.5);
-            margin-top: 15px;
-            border-radius: 5px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            width: 80%;
         }
     </style>
 </head>
 <body>
 
-    <h1>🎵 Theremin Web Avanzado</h1>
-    <p id="status">Pulsa el botón para empezar a hacer música. Asegúrate de estar en HTTPS.</p>
+    <h1>🎵 Theremin Móvil</h1>
+    <p id="status">Pulsa el botón para empezar a hacer música</p>
     
     <button id="toggleBtn">ACTIVAR SONIDO Y SENSORES</button>
 
-    <canvas id="visualizer" width="300" height="100"></canvas>
-
     <div class="data-display">
-        <div class="data-item">
-            Frecuencia (Beta): <span id="freqVal">0</span> Hz
-        </div>
-        <div class="data-item">
-            Volumen (Gamma): <span id="volVal">0</span> %
-        </div>
-        <div class="data-item">
-            Timbre (Alpha): <span id="timbreVal">SINE</span>
-        </div>
+        <p>Frecuencia (Beta): <span id="freqVal">0</span> Hz</p>
+        <p>Volumen (Gamma): <span id="volVal">0</span> %</p>
     </div>
-    
+
     <script>
-        // --- Variables Globales ---
         let audioCtx = null;
         let oscillator = null;
         let gainNode = null;
-        let analyser = null;
-        let dataArray = null;
-        let wakeLock = null; // Para Wake Lock API
         let isPlaying = false;
-        const WAVEFORMS = ['sine', 'square', 'sawtooth', 'triangle'];
+        let wakeLock = null; // Para Wake Lock API
 
         const toggleBtn = document.getElementById('toggleBtn');
         const statusText = document.getElementById('status');
         const freqDisp = document.getElementById('freqVal');
         const volDisp = document.getElementById('volVal');
-        const timbreDisp = document.getElementById('timbreVal');
-        const canvas = document.getElementById('visualizer');
-        const canvasCtx = canvas.getContext('2d');
 
         // --- 1. Audio Setup ---
         function initAudio() {
@@ -111,110 +77,48 @@
             const AudioContext = window.AudioContext || window.webkitAudioContext;
             audioCtx = new AudioContext();
 
-            // 1. Oscilador (Generador de Tono)
             oscillator = audioCtx.createOscillator();
             oscillator.type = 'sine';
             
-            // 2. Ganancia (Volumen)
             gainNode = audioCtx.createGain();
             
-            // 3. Analizador (Visualización de Espectro)
-            analyser = audioCtx.createAnalyser();
-            analyser.fftSize = 256;
-            dataArray = new Uint8Array(analyser.frequencyBinCount);
-            
-            // Conexión: Oscilador -> Ganancia -> Analizador -> Altavoces
             oscillator.connect(gainNode);
-            gainNode.connect(analyser);
-            analyser.connect(audioCtx.destination); 
+            gainNode.connect(audioCtx.destination);
 
-            gainNode.gain.value = 0; // Inicia en silencio
+            // Iniciar suavemente
+            gainNode.gain.value = 0;
             oscillator.start();
-
-            // Iniciar el bucle de visualización
-            drawVisualizer();
         }
 
-        // --- 2. Sensor Handler (La parte "Interesante") ---
+        // --- 2. Sensor Handler ---
         function handleOrientation(event) {
             if (!isPlaying) return;
 
-            // --- BETA: Frecuencia (Logarítmico) ---
+            // Beta (Eje de Frecuencia: 200Hz - 1000Hz)
             let beta = event.beta; 
             if (beta < 0) beta = 0; 
             if (beta > 90) beta = 90;
 
-            const tilt_ratio = beta / 90; // Rango 0 a 1
-            const MIN_FREQ = 100;
-            const MAX_FREQ = 2000; 
-
-            // Fórmula exponencial para mapeo musical
-            const frequency = MIN_FREQ * Math.pow((MAX_FREQ / MIN_FREQ), tilt_ratio); 
+            const frequency = 200 + (beta * 8.8); // 800Hz de rango de modulación
             
-            // --- GAMMA: Volumen (Lineal) ---
+            // Gamma (Eje de Volumen: 0 - 1)
             let gamma = event.gamma;
-            let volume = (gamma + 45) / 90; 
+            let volume = (gamma + 45) / 90; // Mapea -45 a 0, +45 a 1
             
             if (volume < 0) volume = 0;
             if (volume > 1) volume = 1;
 
-            // --- ALPHA: Timbre/Waveform (Discreto) ---
-            let alpha = event.alpha;
-            // Divide los 360 grados en 4 zonas de 90 grados
-            const waveIndex = Math.floor(alpha / 90); 
-            const newWave = WAVEFORMS[waveIndex];
-
-            // APLICAR CAMBIOS
+            // Aplicar cambios con un suavizado de 0.05s (evita clicks)
             oscillator.frequency.setTargetAtTime(frequency, audioCtx.currentTime, 0.05);
             gainNode.gain.setTargetAtTime(volume, audioCtx.currentTime, 0.05);
-            
-            if (oscillator.type !== newWave) {
-                oscillator.type = newWave;
-                timbreDisp.innerText = newWave.toUpperCase();
-            }
 
             // Actualizar interfaz
             freqDisp.innerText = Math.round(frequency);
             volDisp.innerText = Math.round(volume * 100);
-            document.body.style.backgroundColor = `hsl(${frequency / 5}, 70%, 15%)`;
+            document.body.style.backgroundColor = `hsl(${frequency / 4}, 70%, 15%)`;
         }
 
-        // --- 3. Visualizador de Espectro ---
-        function drawVisualizer() {
-            requestAnimationFrame(drawVisualizer);
-
-            if (!isPlaying || !analyser) {
-                canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-                return;
-            }
-
-            analyser.getByteFrequencyData(dataArray);
-
-            const WIDTH = canvas.width;
-            const HEIGHT = canvas.height;
-
-            // Limpiar canvas
-            canvasCtx.fillStyle = 'rgb(34, 34, 34)';
-            canvasCtx.fillRect(0, 0, WIDTH, HEIGHT);
-
-            let barWidth = (WIDTH / analyser.frequencyBinCount) * 0.9;
-            let barHeight;
-            let x = 0;
-
-            // Dibujar barras de frecuencia
-            for(let i = 0; i < analyser.frequencyBinCount; i++) {
-                barHeight = dataArray[i] / 2;
-
-                // Color que reacciona a la frecuencia
-                let hue = 180 + (i * 2.5);
-                canvasCtx.fillStyle = 'hsl(' + hue + ', 100%, ' + (barHeight + 30) + '%)'; 
-                canvasCtx.fillRect(x, HEIGHT - barHeight, barWidth, barHeight);
-
-                x += barWidth + 1;
-            }
-        }
-
-        // --- 4. Wake Lock (Para evitar que la pantalla se apague) ---
+        // --- 3. Wake Lock (Para evitar que la pantalla se apague) ---
         async function requestWakeLock() {
             if ('wakeLock' in navigator) {
                 try {
@@ -234,14 +138,14 @@
             }
         }
 
-        // --- 5. Toggle Play/Stop y Permisos ---
+        // --- 4. Toggle Play/Stop ---
         async function togglePlay() {
             if (!audioCtx) initAudio();
 
             if (isPlaying) {
                 // LÓGICA DE STOP
-                releaseWakeLock(); 
-                gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1); 
+                releaseWakeLock(); // Liberar el bloqueo de pantalla
+                gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1); // Fundido de salida
                 audioCtx.suspend(); 
                 isPlaying = false;
 
@@ -256,24 +160,24 @@
                 if (!window.sensorListenerAttached) {
                    await requestPermissionsAndAttachListener();
                 }
-                
-                // Si el permiso fue denegado, salimos
-                if (!window.sensorListenerAttached) return;
 
-                await requestWakeLock();
+                await requestWakeLock(); // Activar el bloqueo de pantalla
                 
                 audioCtx.resume().then(() => {
+                    // Volumen inicial bajo después de reanudar
                     gainNode.gain.setTargetAtTime(0.01, audioCtx.currentTime, 0.1); 
                     isPlaying = true;
 
                     toggleBtn.innerText = "DETENER SONIDO";
                     toggleBtn.classList.add('stop-color');
-                    statusText.innerText = "¡Sensores Activos! Mueve el móvil para cambiar Frecuencia (Inclinación), Volumen (Lateral) y Timbre (Rotación).";
+                    statusText.innerText = "¡Sensores Activos! Mueve el móvil.";
                 });
             }
         }
         
+        // --- 5. Manejo de Permisos (iOS) ---
         async function requestPermissionsAndAttachListener() {
+            // Este es el listener principal de sensores. Solo debe ser añadido una vez.
             window.addEventListener('deviceorientation', handleOrientation);
             window.sensorListenerAttached = true;
 
@@ -282,14 +186,13 @@
                 try {
                     const permission = await DeviceOrientationEvent.requestPermission();
                     if (permission !== 'granted') {
-                        alert("Permiso denegado para usar el giroscopio. El Theremin no funcionará.");
+                        alert("Permiso denegado. No se podrá usar el Theremin.");
                         window.sensorListenerAttached = false;
                         return;
                     }
                 } catch (e) {
                     console.error("Error al solicitar permisos:", e);
-                    alert("Error crítico con los sensores. Asegúrate de estar usando HTTPS.");
-                    window.sensorListenerAttached = false;
+                    alert("Error crítico con los sensores.");
                 }
             }
         }
@@ -297,12 +200,13 @@
         // Evento del botón principal
         toggleBtn.addEventListener('click', togglePlay);
 
-        // Resiliencia del audio (Resume si el usuario vuelve a la pestaña)
+        // BONUS: Si el usuario vuelve a la aplicación (tras suspender), intenta reanudar el audio
         document.addEventListener('visibilitychange', () => {
             if (audioCtx && audioCtx.state === 'suspended' && document.visibilityState === 'visible' && isPlaying) {
                 audioCtx.resume();
                 requestWakeLock();
             } else if (audioCtx && document.visibilityState === 'hidden') {
+                // Si la app pasa a segundo plano, liberamos el wake lock
                 releaseWakeLock(); 
             }
         });
