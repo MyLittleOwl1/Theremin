@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Theremin JavaScript</title>
+    <title>Theremin JavaScript V2</title>
     <style>
         body {
             font-family: 'Arial', sans-serif;
@@ -15,7 +15,8 @@
             justify-content: center;
             height: 100vh;
             text-align: center;
-            overflow: hidden; /* Evita scroll al mover el móvil */
+            overflow: hidden; 
+            transition: background-color 0.5s;
         }
         h1 { margin-bottom: 10px; }
         #status { font-size: 1.2rem; margin-bottom: 20px; color: #aaa; }
@@ -31,8 +32,10 @@
             font-weight: bold;
             box-shadow: 0 0 15px #00d2ff;
             transition: transform 0.1s;
+            margin-bottom: 10px;
         }
         button:active { transform: scale(0.95); }
+        .stop-color { background-color: #ff3838; box-shadow: 0 0 15px #ff3838; }
 
         .data-display {
             margin-top: 30px;
@@ -46,9 +49,9 @@
 <body>
 
     <h1>🎵 Theremin Móvil</h1>
-    <p id="status">Pulsa el botón para activar</p>
+    <p id="status">Pulsa el botón para empezar a hacer música</p>
     
-    <button id="startBtn">ACTIVAR SONIDO Y SENSORES</button>
+    <button id="toggleBtn">ACTIVAR SONIDO Y SENSORES</button>
 
     <div class="data-display">
         <p>Frecuencia (Beta): <span id="freqVal">0</span> Hz</p>
@@ -56,107 +59,157 @@
     </div>
 
     <script>
-        let audioCtx;
-        let oscillator;
-        let gainNode;
+        let audioCtx = null;
+        let oscillator = null;
+        let gainNode = null;
         let isPlaying = false;
+        let wakeLock = null; // Para Wake Lock API
 
-        const startBtn = document.getElementById('startBtn');
+        const toggleBtn = document.getElementById('toggleBtn');
         const statusText = document.getElementById('status');
         const freqDisp = document.getElementById('freqVal');
         const volDisp = document.getElementById('volVal');
 
-        // Configuración inicial del Audio
+        // --- 1. Audio Setup ---
         function initAudio() {
-            // 1. Crear contexto de audio (Cross-browser)
+            if (audioCtx) return; 
+
             const AudioContext = window.AudioContext || window.webkitAudioContext;
             audioCtx = new AudioContext();
 
-            // 2. Crear Oscilador (Generador de ondas)
             oscillator = audioCtx.createOscillator();
-            oscillator.type = 'sine'; // Onda senoidal (suave, como un silbido)
+            oscillator.type = 'sine';
             
-            // 3. Crear nodo de Ganancia (Control de volumen)
             gainNode = audioCtx.createGain();
             
-            // 4. Conectar: Oscilador -> Ganancia -> Altavoces
             oscillator.connect(gainNode);
             gainNode.connect(audioCtx.destination);
 
-            // Iniciar con volumen 0 para que no asuste
+            // Iniciar suavemente
             gainNode.gain.value = 0;
             oscillator.start();
-            isPlaying = true;
         }
 
-        // Función que maneja los sensores
+        // --- 2. Sensor Handler ---
         function handleOrientation(event) {
             if (!isPlaying) return;
 
-            // --- BETA: Inclinación adelante/atrás (-180 a 180) ---
-            // Lo limitamos a un rango útil de 0 a 90 grados para frecuencia
+            // Beta (Eje de Frecuencia: 200Hz - 1000Hz)
             let beta = event.beta; 
-            if (beta < 0) beta = 0; // Solo inclinación hacia el usuario
+            if (beta < 0) beta = 0; 
             if (beta > 90) beta = 90;
 
-            // Mapear inclinación a Frecuencia (Hz)
-            // Rango deseado: 200Hz (grave) a 1000Hz (agudo)
-            const frequency = 200 + (beta * 8); 
+            const frequency = 200 + (beta * 8.8); // 800Hz de rango de modulación
             
-            // --- GAMMA: Inclinación Izquierda/Derecha (-90 a 90) ---
+            // Gamma (Eje de Volumen: 0 - 1)
             let gamma = event.gamma;
-            // Normalizar gamma para volumen (0 a 1)
-            // Supongamos que -45 es silencio y +45 es volumen máximo
-            let volume = (gamma + 45) / 90;
+            let volume = (gamma + 45) / 90; // Mapea -45 a 0, +45 a 1
             
-            // Limitar valores entre 0 y 1
             if (volume < 0) volume = 0;
             if (volume > 1) volume = 1;
 
-            // APLICAR CAMBIOS AL SONIDO EN TIEMPO REAL
-            // Usamos setTargetAtTime para suavizar la transición y evitar "clicks"
+            // Aplicar cambios con un suavizado de 0.05s (evita clicks)
             oscillator.frequency.setTargetAtTime(frequency, audioCtx.currentTime, 0.05);
             gainNode.gain.setTargetAtTime(volume, audioCtx.currentTime, 0.05);
 
-            // Actualizar pantalla
+            // Actualizar interfaz
             freqDisp.innerText = Math.round(frequency);
             volDisp.innerText = Math.round(volume * 100);
-            
-            // Cambiar color de fondo según el tono para efecto visual
-            document.body.style.backgroundColor = `hsl(${frequency / 4}, 50%, 20%)`;
+            document.body.style.backgroundColor = `hsl(${frequency / 4}, 70%, 15%)`;
         }
 
-        // --- GESTIÓN DE PERMISOS (CRUCIAL PARA iOS 13+) ---
-        startBtn.addEventListener('click', async () => {
-            
-            // 1. Iniciar Audio (Navegadores bloquean audio si no hay click)
-            if (!audioCtx) initAudio();
-            if (audioCtx.state === 'suspended') audioCtx.resume();
+        // --- 3. Wake Lock (Para evitar que la pantalla se apague) ---
+        async function requestWakeLock() {
+            if ('wakeLock' in navigator) {
+                try {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    console.log('Wake Lock: Activo');
+                } catch (err) {
+                    console.error('Wake Lock Error:', err.message);
+                }
+            }
+        }
 
-            // 2. Solicitar permiso de sensores
+        function releaseWakeLock() {
+            if (wakeLock) {
+                wakeLock.release();
+                wakeLock = null;
+                console.log('Wake Lock: Liberado');
+            }
+        }
+
+        // --- 4. Toggle Play/Stop ---
+        async function togglePlay() {
+            if (!audioCtx) initAudio();
+
+            if (isPlaying) {
+                // LÓGICA DE STOP
+                releaseWakeLock(); // Liberar el bloqueo de pantalla
+                gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1); // Fundido de salida
+                audioCtx.suspend(); 
+                isPlaying = false;
+
+                toggleBtn.innerText = "ACTIVAR SONIDO Y SENSORES";
+                toggleBtn.classList.remove('stop-color');
+                statusText.innerText = "Detenido. Pulsa para reanudar.";
+                document.body.style.backgroundColor = '#222';
+            } else {
+                // LÓGICA DE PLAY/RESUME
+                
+                // Pedir permisos y añadir listeners si es la primera vez
+                if (!window.sensorListenerAttached) {
+                   await requestPermissionsAndAttachListener();
+                }
+
+                await requestWakeLock(); // Activar el bloqueo de pantalla
+                
+                audioCtx.resume().then(() => {
+                    // Volumen inicial bajo después de reanudar
+                    gainNode.gain.setTargetAtTime(0.01, audioCtx.currentTime, 0.1); 
+                    isPlaying = true;
+
+                    toggleBtn.innerText = "DETENER SONIDO";
+                    toggleBtn.classList.add('stop-color');
+                    statusText.innerText = "¡Sensores Activos! Mueve el móvil.";
+                });
+            }
+        }
+        
+        // --- 5. Manejo de Permisos (iOS) ---
+        async function requestPermissionsAndAttachListener() {
+            // Este es el listener principal de sensores. Solo debe ser añadido una vez.
+            window.addEventListener('deviceorientation', handleOrientation);
+            window.sensorListenerAttached = true;
+
+            // Lógica para iOS 13+
             if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-                // iOS 13+ requiere esto
                 try {
                     const permission = await DeviceOrientationEvent.requestPermission();
-                    if (permission === 'granted') {
-                        window.addEventListener('deviceorientation', handleOrientation);
-                        statusText.innerText = "¡Sensores Activos! Mueve el móvil.";
-                        startBtn.style.display = 'none';
-                    } else {
-                        alert("Permiso denegado para usar el giroscopio.");
+                    if (permission !== 'granted') {
+                        alert("Permiso denegado. No se podrá usar el Theremin.");
+                        window.sensorListenerAttached = false;
+                        return;
                     }
                 } catch (e) {
-                    console.error(e);
-                    alert("Error al solicitar permisos.");
+                    console.error("Error al solicitar permisos:", e);
+                    alert("Error crítico con los sensores.");
                 }
-            } else {
-                // Android y dispositivos antiguos (No requieren permiso explícito)
-                window.addEventListener('deviceorientation', handleOrientation);
-                statusText.innerText = "¡Sensores Activos! Mueve el móvil.";
-                startBtn.style.display = 'none';
+            }
+        }
+
+        // Evento del botón principal
+        toggleBtn.addEventListener('click', togglePlay);
+
+        // BONUS: Si el usuario vuelve a la aplicación (tras suspender), intenta reanudar el audio
+        document.addEventListener('visibilitychange', () => {
+            if (audioCtx && audioCtx.state === 'suspended' && document.visibilityState === 'visible' && isPlaying) {
+                audioCtx.resume();
+                requestWakeLock();
+            } else if (audioCtx && document.visibilityState === 'hidden') {
+                // Si la app pasa a segundo plano, liberamos el wake lock
+                releaseWakeLock(); 
             }
         });
-
     </script>
 </body>
 </html>
